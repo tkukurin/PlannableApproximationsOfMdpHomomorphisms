@@ -44,6 +44,7 @@ class KeyTask(gym.Env):
   def __init__(self, seed=42, max_steps=100):
     self.max_steps = max_steps
     self.actions = self.Ns
+    self.action_space = [0,1,2,3]
     self.width = 6
     self.height = 6
 
@@ -157,5 +158,6 @@ class KeyTask(gym.Env):
     elif not reward:
       reward = -.1
 
-    return self.render(), reward, done or self.curstep == self.max_steps, None
+    won = reward == 1
+    return self.render(), reward, done or self.curstep == self.max_steps, won
 

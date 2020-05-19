@@ -1,22 +1,26 @@
+
 import argparse
-from pathlib import Path
+import logging
+import pickle
 import os
 import sys
-sys.path.append('..')
 
-from tqdm import trange, tqdm
+import numpy as np
+
+import model
+import gen
+
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.utils import data
 from torch import optim
-import numpy as np
 
-import model, gen, env
+from env import KeyTask
 from collections import Counter
+from pathlib import Path
+from tqdm import trange, tqdm
 
-import logging
-import pickle
 
 logging.basicConfig(
   format='[%(levelname)s:%(asctime)s] %(message)s',
@@ -27,7 +31,6 @@ logging.getLogger('skimage').setLevel(logging.CRITICAL)
 logging.getLogger('model').setLevel(logging.DEBUG)
 
 L = logging.getLogger(__name__)
-print = L.info
 
 
 def predict(planner, env):
@@ -40,22 +43,23 @@ def predict(planner, env):
   while not done:
     action = planner.pi(obs, env.valid_actions).item()
     # TODO? add new prototype states here maybe
-    obs, reward, done, _ = env.step(action)
+    obs, reward, done, win = env.step(action)
     acs.append(action)
 
-  return acs, reward
+  return acs, win
 
 
 def main(
     episodes=10, backup=10, epochs=1, seed=42, save=None, load=None,
     proto_samples=1024):
-  keytask = env.KeyTask(seed=seed, max_steps=100)
-  replay = gen.gen_env(keytask, n_episodes=episodes)
+  task = KeyTask(seed=seed, max_steps=100)
+  replay = gen.gen_env(env, n_episodes=episodes)
   tloader = gen.Transitions(replay)
   loader = data.DataLoader(tloader, batch_size=512, shuffle=True)
 
   device = torch.device('cuda')
-  learner = model.Learner(device, latent_dim=50, in_shape=(3, 60, 60))
+  learner = model.Learner(
+    device, latent_dim=50, in_shape=(3, 60, 60), action_dim=len(env.action_space))
   if load:
     try:
       learner.load_state_dict(torch.load(load, map_location=device))
@@ -80,28 +84,24 @@ def main(
       torch.save(learner.state_dict(), save)
       L.info('Stored model to %s', save)
 
-  with torch.no_grad():
-    L.info('Using: keytask_train = env.KeyTask(seed=seed, max_steps=100)')
-    keytask_train = env.KeyTask(seed=seed, max_steps=100)
-
-    learner.eval()
-    wins = 0
-    act_counts = Counter()
-    prototype_states = [
-      tloader[idx][0] for idx in
-      np.random.default_rng().choice(np.arange(len(tloader)), proto_samples)
-    ]
-    with trange(1, 1001) as t:
-      for k in t:
-        keytask_train.reset()
-        planner = model.ValueIteration(learner, prototype_states, backup=backup)
-        acts, reward = predict(planner, keytask_train)
-        wins += (reward > 0)
-        act_counts.update(acts)
-        lens = sum(act_counts.values())
-        t.set_postfix({
-          'wins': wins, 'acts':act_counts, 'L': len(acts), 'La': lens / k })
-    L.info('Done. Wins: %s (avg %s)', wins, lens/k)
+  learner.eval()
+  wins = 0
+  act_counts = Counter()
+  prototype_states = [
+    tloader[idx][0] for idx in
+    np.random.default_rng().choice(np.arange(len(tloader)), proto_samples)
+  ]
+  with trange(1, 1001) as t:
+    for k in t:
+      env.reset()
+      planner = model.ValueIteration(learner, prototype_states, backup=backup)
+      acts, win = predict(planner, env)
+      wins += win
+      act_counts.update(acts)
+      lens = sum(act_counts.values())
+      t.set_postfix({
+        'wins': wins, 'acts':act_counts, 'L': len(acts), 'La': lens / k })
+  L.info('Done. Wins: %s (avg %s)', wins, lens/k)
 
 
 def mkflags(include):

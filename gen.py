@@ -1,3 +1,4 @@
+import gym
 import typing as t
 import torch
 import numpy as np
@@ -5,7 +6,6 @@ import numpy as np
 from torch.utils import data
 
 from tqdm import trange
-from env import KeyTask
 
 
 def to_float(np_array):
@@ -42,18 +42,16 @@ class Transitions(data.Dataset):
     return obs, act, rew, nobs
 
 
-def gen_env(env: KeyTask, n_episodes=1000):
+def gen_env(env: gym.Env, n_episodes=1000):
   '''Generate `n_episodes` times of (s, a, r, s').'''
   replay = []
 
   for episode in trange(n_episodes):
     obs = env.reset()
-    replay.append({'obs':[], 'act':[], 'nobs': [], 'rew': [],
-                    'goal': env.render_goal_state()})
+    replay.append({'obs':[], 'act':[], 'nobs': [], 'rew': [],})
     while True:
       replay[-1]['obs'].append(obs)
-      assert env.valid_actions, 'No valid actions?!'
-      action = np.random.randint(0, len(env.actions))
+      action = np.random.randint(0, len(env.action_space))
       obs, reward, done, _ = env.step(action)
       replay[-1]['rew'].append(reward)
       replay[-1]['act'].append(action)

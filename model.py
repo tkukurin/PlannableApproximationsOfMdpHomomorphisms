@@ -36,7 +36,7 @@ def pairwise_softmax(z1, z2, temperature=1.0):
 
 
 class ValueIteration:
-  def __init__(self, learner, prototype_states, action_dim=4, backup=500):
+  def __init__(self, learner, prototype_states, backup=500):
     self.device = learner.device
     self.learner = learner
 
@@ -46,6 +46,7 @@ class ValueIteration:
     self.trans_temperature = 1.0
     self.backup = backup
 
+    action_dim = learner.action_dim
     self.actions = torch.arange(0, action_dim).to(self.device)
     self.prototype_states = self.learner.Z_theta(torch.tensor(
       prototype_states).to(self.device)).unique(dim=0)
@@ -95,7 +96,7 @@ class ValueIteration:
 
       already_proto = torch.max((z - self.prototype_states[idx])**2) < 1e-9
       if not already_proto.item():
-        q = torch.tensor([[0.]]).to(self.device)
+        q = torch.tensor([0.]).to(self.device)
         self.prototype_states = torch.cat((self.prototype_states, z), dim=0)
         self.prototype_values = torch.cat((self.prototype_values, q), dim=0)
         idx = self.closest(z.unsqueeze(0)).item()  # "unit test"
@@ -136,15 +137,18 @@ class ValueIteration:
 class Learner(nn.Module):
   '''Uses notation from the paper mostly.'''
   def __init__(self, device, in_shape=(3, 60, 60), latent_dim=50,
-      negative_samples=1):
+      negative_samples=1, action_dim=4):
     super().__init__()
 
+    self.action_dim = action_dim
     self.device = device
     self.J = negative_samples
     self.hinge = 1.0
     self.latent_dim = latent_dim
 
-    self.A = LatentToTrans(self.latent_dim).to(device)
+    self.A = LatentToTrans(
+        latent_dim=self.latent_dim,
+        action_dim=self.action_dim).to(device)
     self.R = LatentToReward(self.latent_dim).to(device)
     self.Z_theta = ObservationToLatent(
         latent_dim=self.latent_dim,
