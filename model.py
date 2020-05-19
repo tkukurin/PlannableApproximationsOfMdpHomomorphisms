@@ -36,9 +36,9 @@ def pairwise_softmax(z1, z2, temperature=1.0):
 
 
 class ValueIteration:
-  def __init__(self, runner, prototype_states, action_dim=4, backup=500):
-    self.device = runner.device
-    self.runner = runner
+  def __init__(self, learner, prototype_states, action_dim=4, backup=500):
+    self.device = learner.device
+    self.learner = learner
 
     #> we opt for a low value for n to assign most Q-value to closest state
     self.interpolation_param = 1e-20
@@ -47,7 +47,7 @@ class ValueIteration:
     self.backup = backup
 
     self.actions = torch.arange(0, action_dim).to(self.device)
-    self.prototype_states = self.runner.Z_theta(torch.tensor(
+    self.prototype_states = self.learner.Z_theta(torch.tensor(
       prototype_states).to(self.device)).unique(dim=0)
     self.prototype_values = torch.zeros(len(self.prototype_states)).to(self.device)
 
@@ -58,7 +58,7 @@ class ValueIteration:
     state = torch.tensor(state).to(self.device)
     valid_actions = torch.tensor(valid_actions).to(self.device)
 
-    z = self.runner.Z_theta(state.unsqueeze(0))
+    z = self.learner.Z_theta(state.unsqueeze(0))
     zs = z.unsqueeze(0).expand(valid_actions.shape[0], 1, z.shape[1])
 
     Q_zs_a = self.Q(zs, valid_actions)
@@ -90,7 +90,7 @@ class ValueIteration:
     '''Add goal state to protos; plan using a discretized latent-space MDP.'''
     with torch.no_grad():
       goal_state = torch.tensor(goal_state).to(self.device).unsqueeze(0)
-      z = self.runner.Z_theta(goal_state)
+      z = self.learner.Z_theta(goal_state)
       idx = self.closest(z.unsqueeze(0)).item()
 
       already_proto = torch.max((z - self.prototype_states[idx])**2) < 1e-9
@@ -112,7 +112,7 @@ class ValueIteration:
     actions = self.actions.unsqueeze(1).expand(A, Np)
 
     # Discretize: find *closest prototype* for each predicted next latent state.
-    next_states_predicted = self.runner.T(qstates, actions)
+    next_states_predicted = self.learner.T(qstates, actions)
     self.next_idxs = pairwise_distance(next_states_predicted, qstates).argmin(-1)
     # Eqn. (9) == assume states connected in state space will also be in latent.
     # T(zj|zi,a) = softmax(-d(zj, zi+A(zi,a)) / t) where zi \in X
@@ -140,7 +140,6 @@ class Learner(nn.Module):
     super().__init__()
 
     self.device = device
-
     self.J = negative_samples
     self.hinge = 1.0
     self.latent_dim = latent_dim
@@ -157,7 +156,6 @@ class Learner(nn.Module):
 
   def loss(self, obs, act, reward, obs_next):
     B = obs.shape[0]
-    device = obs.device
 
     # B x latent_dim
     zs = self.Z_theta(obs)
@@ -177,10 +175,10 @@ class Learner(nn.Module):
     # Paper says J=1 is fine too when reward loss is taken into account.
     zs_neg = zs.repeat(self.J, 1)[np.random.permutation(B*self.J)]
     zs_next_pred = zs_next_pred.repeat(self.J, 1)
-    zeros = torch.zeros(B).to(device)
+    zeros = torch.zeros(B*self.J).to(self.device)
     loss_neg = torch.max(zeros, self.hinge - distance(zs_neg, zs_next_pred))
 
-    return torch.mean(loss_T + loss_R + loss_neg)
+    return (loss_T.sum() + loss_R + loss_neg.sum()) / B
 
 
 class ObservationToLatent(nn.Module):
