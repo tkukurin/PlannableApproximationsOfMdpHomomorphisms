@@ -50,9 +50,10 @@ def predict(planner, env):
 
 
 def main(
-    episodes=10, backup=10, epochs=1, seed=42, save=None, load=None,
-    proto_samples=1024):
-  task = KeyTask(seed=seed, max_steps=100)
+    episodes, backup, epochs, seed, save, load, proto_samples, neg_samples, task):
+  Env = dict(keytask=KeyTask)[task]
+  env = Env(seed=seed, max_steps=100)
+
   replay = gen.gen_env(env, n_episodes=episodes)
   tloader = gen.Transitions(replay)
   loader = data.DataLoader(tloader, batch_size=512, shuffle=True)
@@ -68,8 +69,10 @@ def main(
       learner = torch.load(load, map_location=device)
   else:
     optimizer = optim.Adam(learner.parameters(), lr=0.001)
-    L.info('Starting training for %s', epochs)
+    L.info('Starting training for %s epochs.', epochs)
+    L.info('Saving best model to %s.', save)
     with trange(1, epochs+1) as t:
+      best_loss = 1e9
       for epoch in t:
         loss_ = 0
         for step, batch in enumerate(tqdm(loader)):
@@ -79,17 +82,18 @@ def main(
           loss.backward()
           loss_ += loss.item()
           optimizer.step()
-        t.set_postfix(loss=loss_ / step)
-    if save:
-      torch.save(learner.state_dict(), save)
-      L.info('Stored model to %s', save)
+        avg_loss = loss_ / len(loader.dataset)
+        if save and avg_loss > best_loss:
+          best_loss = avg_loss
+          torch.save(learner.state_dict(), save)
+        t.set_postfix(best=best_loss, avg=avg_loss)
 
   learner.eval()
   wins = 0
   act_counts = Counter()
   prototype_states = [
     tloader[idx][0] for idx in
-    np.random.default_rng().choice(np.arange(len(tloader)), proto_samples)
+    np.random.default_rng(seed).choice(np.arange(len(tloader)), proto_samples)
   ]
   with trange(1, 1001) as t:
     for k in t:
@@ -99,8 +103,7 @@ def main(
       wins += win
       act_counts.update(acts)
       lens = sum(act_counts.values())
-      t.set_postfix({
-        'wins': wins, 'acts':act_counts, 'L': len(acts), 'La': lens / k })
+      t.set_postfix(wins=wins, acts=act_counts, L=len(acts), La=lens/k)
   L.info('Done. Wins: %s (avg %s)', wins, lens/k)
 
 
@@ -127,6 +130,8 @@ if __name__ == '__main__':
     save=('model_default.pt', str),
     load=(None, str),
     proto_samples=(1024, int),
+    neg_samples=1,
+    task='keytask',
   ))
 
   L.info('Called with args: %s', args)

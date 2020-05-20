@@ -142,22 +142,24 @@ class KeyTask(gym.Env):
 
   def step(self, action):
     self.curstep += 1
+    out_of_time = self.curstep == self.max_steps
 
     self.move(self.player, self.actions[action])
 
     reward = None
+    won = False
     if self.key in self.objects and self.player.pos == self.key.pos:
       self.player.pickup(self.key, self)
       reward = 1  # reward key pickup
 
     # NOTE(tk) Different dynamics than the paper.
     # Their reward is 0 if reaching goal without the key.
-    done = self.player.pos == self.goal_state
-    if done:
+    in_goal = self.player.pos == self.goal_state
+    if in_goal:
       reward = 1 if self.key in self.player.inv else -1
+      won = reward == 1
     elif not reward:
       reward = -.1
 
-    won = reward == 1
-    return self.render(), reward, done or self.curstep == self.max_steps, won
+    return self.render(), reward, in_goal or out_of_time, won
 
