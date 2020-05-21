@@ -83,7 +83,7 @@ def main(
           loss_ += loss.item()
           optimizer.step()
         avg_loss = loss_ / len(loader.dataset)
-        if save and avg_loss > best_loss:
+        if save and avg_loss < best_loss:
           best_loss = avg_loss
           torch.save(learner.state_dict(), save)
         t.set_postfix(best=best_loss, avg=avg_loss)
