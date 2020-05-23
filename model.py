@@ -174,7 +174,7 @@ class Learner(nn.Module):
 
     # B - B <<scalar>>
     # reward distance in latent space vs. original MDP
-    loss_R = distance(reward, self.R(zs_next).flatten())
+    loss_R = distance(reward, self.R(zs).flatten())
 
     # Paper says J=1 is fine too when reward loss is taken into account.
     zs_neg = zs.repeat(self.J, 1)[np.random.permutation(B*self.J)]
