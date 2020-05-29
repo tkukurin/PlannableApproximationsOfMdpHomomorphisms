@@ -105,7 +105,7 @@ class ValueIteration:
       self.goal_idx = idx
       return self._plan(discount, stop_iter_epsilon)
 
-  def _plan(self, discount=0.9, stop_iter_epsilon=1e-50):
+  def _plan(self, discount=0.9, stop_iter_epsilon=1e-20):
     A, = self.actions.shape
     Np, D = self.prototype_states.shape
 
@@ -114,24 +114,27 @@ class ValueIteration:
 
     # Discretize: find *closest prototype* for each predicted next latent state.
     next_states_predicted = self.learner.T(qstates, actions)
-    self.next_idxs = pairwise_distance(next_states_predicted, qstates).argmin(-1)
+
     # Eqn. (9) == assume states connected in state space will also be in latent.
     # T(zj|zi,a) = softmax(-d(zj, zi+A(zi,a)) / t) where zi \in X
     # NOTE(tk) I would assume that high-reward states might be far away.
-    T = pairwise_softmax(qstates, next_states_predicted, self.trans_temperature)
-    T = T.gather(-1, self.next_idxs.unsqueeze(-1)).squeeze(-1)
+    T = pairwise_softmax(next_states_predicted, qstates, self.trans_temperature)
+    next_idxs = T.argmax(-1)
 
     #> We use this reward function in planning, R(x)=1 if x=Z(sg) else 0
-    reward = (self.next_idxs == self.goal_idx).float()
+    reward = self.learner.R(next_states_predicted)
+    reward[next_idxs == self.goal_idx] = 1.0
+    reward = (T*reward.expand_as(T).transpose(-1,-2)).sum(-1)
 
     for _ in range(self.backup):
-      next_vals = self.prototype_values.repeat(A, 1).gather(-1, self.next_idxs)
-      self.qvals = T*(reward+discount*next_vals)
+      next_vals = self.prototype_values.unsqueeze(-1).unsqueeze(0)
+      next_vals = (T * next_vals.expand_as(T).transpose(-1,-2)).sum(-1)
+      self.qvals = reward+discount*next_vals
       vnew, _ = self.qvals.max(dim=0)
       delta = (self.prototype_values - vnew).abs().max().item()
       self.prototype_values = vnew
       if delta < stop_iter_epsilon:
-          break
+        break
 
 
 class Learner(nn.Module):
