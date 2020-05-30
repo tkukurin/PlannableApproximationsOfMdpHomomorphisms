@@ -60,7 +60,7 @@ def common():
 @click.argument('load', default='model_default.pt', type=click.Path(exists=True))
 @click.option('--proto_samples', default=1024, type=int)
 @common.command()
-def plan(device, load, proto_samples, task, episodes, seed):
+def plan(device, load, proto_samples, episodes, seed, task):
   Env = dict(keytask=KeyTask)[task]
   env = Env(seed=seed, max_steps=100)
 
@@ -84,16 +84,13 @@ def plan(device, load, proto_samples, task, episodes, seed):
 
   def predict(planner, env):
     planner.plan(goal_state=env.render_goal_state())
-
     done = False
     acs = []
     obs = env.render()
-
     while not done:
       action = planner.pi(obs, env.valid_actions).item()
       obs, reward, done, win = env.step(action)
       acs.append(action)
-
     return acs, win
 
   wins = 0
@@ -111,10 +108,8 @@ def plan(device, load, proto_samples, task, episodes, seed):
 
 @click.argument('save', default='model_default.pt', type=click.Path())
 @click.option('--epochs', default=100, type=int)
-@click.option('--neg_samples', default=1, type=int)
 @common.command()
-def train(device, episodes, epochs, seed, save, neg_samples, task):
-
+def train(device, save, epochs, episodes, seed, task):
   Env = dict(keytask=KeyTask)[task]
   env = Env(seed=seed, max_steps=100)
 
