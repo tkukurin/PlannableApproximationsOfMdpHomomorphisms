@@ -1,4 +1,5 @@
 
+import gin
 import click
 import argparse
 import logging
@@ -35,7 +36,7 @@ L = logging.getLogger(__name__)
 
 
 class GroupExt(click.Group):
-  def add_command(self, cmd, name=None):
+  def add_command(self, cmd: click.Command, name=None):
     click.Group.add_command(self, cmd, name=name)
     for param in self.params:
       cmd.params.append(param)
@@ -56,22 +57,20 @@ def common():
   pass
 
 
-@click.option('--load', default='model_default.pt', type=click.Path(exists=True))
+@click.argument('load', default='model_default.pt', type=click.Path(exists=True))
 @click.option('--proto_samples', default=1024, type=int)
 @common.command()
 def plan(device, load, proto_samples, task, episodes, seed):
   Env = dict(keytask=KeyTask)[task]
   env = Env(seed=seed, max_steps=100)
 
-  learner = model.Learner(
-    device, latent_dim=50, in_shape=(3, 60, 60), action_dim=len(env.action_space))
+  learner = model.Learner(device, action_dim=len(env.action_space))
   try:
     L.info('Loading state dict from %s', load)
-    learner.load_state_dict(torch.load(load, map_location=device))
+    learner.load_state_dict(torch.load(load, map_location=device)['model'])
   except:
     L.warning('Load state dict failed. Trying to load entire object...')
     learner = torch.load(load, map_location=device)
-
 
   replay = gen.gen_env(env, n_episodes=episodes)
   tloader = gen.Transitions(replay)
@@ -110,8 +109,8 @@ def plan(device, load, proto_samples, task, episodes, seed):
   L.info('Done evaluating planning. Wins: %s (avg %s)', wins, lens/k)
 
 
+@click.argument('save', default='model_default.pt', type=click.Path())
 @click.option('--epochs', default=100, type=int)
-@click.option('--save', default='model_default.pt', type=click.Path())
 @click.option('--neg_samples', default=1, type=int)
 @common.command()
 def train(device, episodes, epochs, seed, save, neg_samples, task):
@@ -123,8 +122,7 @@ def train(device, episodes, epochs, seed, save, neg_samples, task):
   tloader = gen.Transitions(replay)
   loader = data.DataLoader(tloader, batch_size=512, shuffle=True)
 
-  learner = model.Learner(
-    device, latent_dim=50, in_shape=(3, 60, 60), action_dim=len(env.action_space))
+  learner = model.Learner(device, action_dim=len(env.action_space))
 
   optimizer = optim.Adam(learner.parameters(), lr=0.001)
   L.info('Starting training for %s epochs.', epochs)
@@ -143,13 +141,19 @@ def train(device, episodes, epochs, seed, save, neg_samples, task):
       avg_loss = loss_ / len(loader.dataset)
       if avg_loss < best_loss:
         best_loss = avg_loss
-        torch.save(learner.state_dict(), save)
+        torch.save(dict(
+          model=learner.state_dict(),
+          config=gin.operative_config_str()), save)
       t.set_postfix(best=best_loss, avg=avg_loss)
   L.info('Done training. Best loss: %s', best_loss)
 
 
-@click.command(cls=click.CommandCollection, sources=[common])
-def cli():
+@click.command(
+  cls=click.CommandCollection, sources=[common])
+@click.argument('config', type=click.Path(exists=True, dir_okay=False))
+@click.pass_context
+def cli(ctx: click.Context, config):
+  gin.parse_config_file(config)
   L.info('Called with args: %s', sys.argv)
 
 

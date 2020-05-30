@@ -1,0 +1,5 @@
+
+Learner.latent_dim = 50
+Learner.in_shape = (3, 60, 60)
+Learner.negative_samples = 1
+

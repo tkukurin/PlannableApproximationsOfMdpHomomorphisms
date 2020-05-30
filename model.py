@@ -1,3 +1,5 @@
+import gin
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -114,7 +116,6 @@ class ValueIteration:
 
     # Discretize: find *closest prototype* for each predicted next latent state.
     next_states_predicted = self.learner.T(qstates, actions)
-
     # Eqn. (9) == assume states connected in state space will also be in latent.
     # T(zj|zi,a) = softmax(-d(zj, zi+A(zi,a)) / t) where zi \in X
     # NOTE(tk) I would assume that high-reward states might be far away.
@@ -122,7 +123,8 @@ class ValueIteration:
     next_idxs = T.argmax(-1)
 
     #> We use this reward function in planning, R(x)=1 if x=Z(sg) else 0
-    reward = self.learner.R(next_states_predicted)
+    # NOTE(tk) try using reward function here?
+    reward = self.learner.R(qstates, actions)
     reward[next_idxs == self.goal_idx] = 1.0
     reward = (T*reward.expand_as(T).transpose(-1,-2)).sum(-1)
 
@@ -137,6 +139,7 @@ class ValueIteration:
         break
 
 
+@gin.configurable
 class Learner(nn.Module):
   '''Uses notation from the paper mostly.'''
   def __init__(self, device, in_shape=(3, 60, 60), latent_dim=50,
@@ -145,14 +148,21 @@ class Learner(nn.Module):
 
     self.action_dim = action_dim
     self.device = device
+    # J=1 is fine if reward loss is taken into account.
     self.J = negative_samples
     self.hinge = 1.0
     self.latent_dim = latent_dim
 
-    self.A = LatentToTrans(
+    self.A = LatentTransform(
         latent_dim=self.latent_dim,
+        output_dim=self.latent_dim,
         action_dim=self.action_dim).to(device)
-    self.R = LatentToReward(self.latent_dim).to(device)
+
+    self.R = LatentTransform(
+        latent_dim=self.latent_dim,
+        output_dim=1,
+        action_dim=self.action_dim).to(device)
+
     self.Z_theta = ObservationToLatent(
         latent_dim=self.latent_dim,
         in_shape=in_shape).to(device)
@@ -171,15 +181,12 @@ class Learner(nn.Module):
 
     distance = lambda a, b: 0.5 * torch.sum((a - b) ** 2, dim=-1)
 
-    # B <<scalar>>
-    # transition->map vs. map->transition
+    # B <<scalar>> == transition->map vs. map->transition
     loss_T = distance(zs_next_pred, zs_next)
 
-    # B - B <<scalar>>
-    # reward distance in latent space vs. original MDP
-    loss_R = distance(reward, self.R(zs).flatten())
+    # B - B <<scalar>> == reward distance in latent space vs. original MDP
+    loss_R = distance(reward, self.R(zs, act).flatten())
 
-    # Paper says J=1 is fine too when reward loss is taken into account.
     zs_neg = zs.repeat(self.J, 1)[np.random.permutation(B*self.J)]
     zs_next_pred = zs_next_pred.repeat(self.J, 1)
     zeros = torch.zeros(B*self.J).to(self.device)
@@ -216,31 +223,19 @@ class ObservationToLatent(nn.Module):
     return self.fc3(self.fc2(self.fc1(flat)))
 
 
-class LatentToTrans(nn.Module):
-  '''Predicts transition from Z and A.'''
-  def __init__(self, latent_dim, action_dim=4):
+class LatentTransform(nn.Module):
+  '''Predicts transition based on state and action.'''
+  def __init__(self, latent_dim, output_dim, action_dim=4):
     super().__init__()
     self.action_dim = action_dim
     self.fc1 = nn.Sequential(
       nn.Linear(latent_dim + action_dim, 64),
       nn.ReLU())
-    self.fc2 = nn.Linear(64, latent_dim)
+    self.fc2 = nn.Linear(64, output_dim)
 
   def forward(self, obs, act):  # (*B,N), (*B,A) -> *B, N
     act_shape = act.shape
     act = to_one_hot(act.reshape(-1,), max_index=self.action_dim)
     obs = torch.cat([obs, act.reshape(*act_shape, self.action_dim)], dim=-1)
-    return self.fc2(self.fc1(obs))
-
-class LatentToReward(nn.Module):
-  '''Predicts reward from latent space Z.'''
-  def __init__(self, latent_dim):
-    super().__init__()
-    self.fc1 = nn.Sequential(
-      nn.Linear(latent_dim, 64),
-      nn.ReLU())
-    self.fc2 = nn.Linear(64, 1)
-
-  def forward(self, obs):
     return self.fc2(self.fc1(obs))
 
