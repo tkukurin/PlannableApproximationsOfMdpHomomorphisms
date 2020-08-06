@@ -20,3 +20,12 @@ Homomorphisms: Equivariance under Actions](https://arxiv.org/abs/2002.11963):
 > using reconstructions, while generalizing better to new goals than model-free
 > approaches.
 
+
+## Running
+
+Perform a training run on CPU:
+```
+python config.gin train --device cpu
+python config.gin plan --device cpu
+```
+
