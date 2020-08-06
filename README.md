@@ -25,7 +25,7 @@ Homomorphisms: Equivariance under Actions](https://arxiv.org/abs/2002.11963):
 
 Perform a training run on CPU:
 ```
-python config.gin train --device cpu
-python config.gin plan --device cpu
+python run.py config.gin train --device cpu
+python run.py config.gin plan --device cpu
 ```
 
